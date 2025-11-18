@@ -13,6 +13,7 @@ use MikoPBX\Core\System\Util;
 use MikoPBX\PBXCoreREST\Controllers\Modules\ModulesControllerBase;
 use MikoPBX\PBXCoreREST\Lib\PBXApiResult;
 use MikoPBX\PBXCoreREST\Services\ApiMetadataRegistry;
+use Modules\ModuleSpeechRecognize\bin\ConnectorDb;
 use Modules\ModuleSpeechRecognize\Lib\SpeechRecognizeConf;
 use Modules\ModuleSpeechRecognize\Models\CdrText;
 use Modules\ModuleSpeechRecognize\Models\GptTasks;
@@ -21,13 +22,23 @@ use Modules\ModuleSpeechRecognize\Models\ManualTasks;
 class ApiController extends ModulesControllerBase
 {
     /**
-     * curl http://127.0.0.1/pbxcore/api/speech-recognize/get-cdr-data?limit=2&offset=1
-     * http://127.0.0.1/pbxcore/api/speech-recognize/get-cdr-data?link-id=mikopbx-1636956887.22252
+     * curl 'http://127.0.0.1/pbxcore/api/speech-recognize/get-cdr-data?limit=2&offset=0'
+     * curl 'http://127.0.0.1/pbxcore/api/speech-recognize/get-cdr-data?link-id=mikopbx-1763473523.9'
      */
     public function getCdrData(): void
     {
-        $sr = new SpeechRecognizeConf();
-        $result = $sr->getCdrDataAction($_REQUEST);
+        $data = $_REQUEST;
+        $result    = new PBXApiResult();
+        if(isset($data['offset'])){
+            $offset = intval($data['offset']??0);
+            $limit  = intval($data['limit']??30);
+            $result->data = ConnectorDb::invoke(ConnectorDb::FUNC_CDR_BY_OFFSET, [$offset, $limit]);
+        }elseif(isset($data['link-id'])){
+            $result->data = ConnectorDb::invoke(ConnectorDb::FUNC_CDR_BY_ID, [$data['link-id']]);
+        }else{
+            $result->data[] = $data;
+        }
+        $result->success = true;
         $this->printResult($result);
     }
 
@@ -39,7 +50,10 @@ class ApiController extends ModulesControllerBase
     private function printResult($data):void
     {
         try {
-            echo json_encode($data->getResult(), JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            if(!is_array($data)){
+                $data =  $data->getResult();
+            }
+            echo json_encode( $data,JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         }catch (\Throwable $e){
             Util::sysLogMsg('ModuleSpeechRecognize', $e->getMessage());
         }
@@ -47,7 +61,7 @@ class ApiController extends ModulesControllerBase
     }
 
     /**
-     * curl 'http://127.0.0.1/pbxcore/api/speech-recognize/add-manual-task?linkedid=mikopbx-1757929000.72'
+     * curl 'http://127.0.0.1/pbxcore/api/speech-recognize/add-manual-task?linkedid=mikopbx-1763473523.9'
      * @return void
      */
     public function addManualTasks()
@@ -59,23 +73,7 @@ class ApiController extends ModulesControllerBase
             $this->printResult($res);
             return;
         }
-        $taskData = ManualTasks::findFirst([
-            'linkedId=:linkedid:',
-            'bind' => [
-                'linkedid'=>$linkedId
-            ]
-        ]);
-        if($taskData){
-            $res->success = true;
-            $res->messages[] = 'The task was already added earlier';
-            $this->printResult($res);
-            return;
-        }
-        $taskData = new ManualTasks();
-        $taskData->linkedId = $linkedId;
-        $taskData->changeTime = time();
-        $res->success = $taskData->save();
-        $res->messages[] = 'The task added.';
+        $res = ConnectorDb::invoke(ConnectorDb::FUNC_ADD_MANUAL_TASK, [$linkedId]);
         $this->printResult($res);
     }
 
@@ -87,7 +85,7 @@ class ApiController extends ModulesControllerBase
       "instruction": "Верни ответ в JSON формате. в запросе телефонный разговор в виде текста\nО.НомерКанала: Реплика ПереводСтроки\nО.НомерКанала: Реплика ПереводСтроки\nПроанализируй реплики. Требуется получить ответы в виде JSON и дозаполнить поля comment, resultBoolean, resultArray\n{\n  \"q1\": {q: \"Задавал ли менеджер вопрос – Когда планируется приобретение?\", comment: \"\", resultBoolean: true},\n  \"q2\": {q: \"Какая номенклатура (товары упоминались), верни массив значений\", comment: \"\", resultArray: true}\n}",
       "temperature": 0,
       "max_tokens": 2000,
-      "id": "mikopbx-1739431681.8"
+      "id": "mikopbx-1763473523.9"
      }'
      *
      * Наполняется таблица задач.
@@ -103,68 +101,15 @@ class ApiController extends ModulesControllerBase
             $this->printResult($res);
             return;
         }
+
+        $this->printResult($data);
         $linkedId = $data['id']??'';
         if(empty($linkedId)){
             $res->messages[] = 'ID is empty...';
             $this->printResult($res);
             return;
         }
-        $instruction = $data['instruction']??"Выдай сводку по телефонному звонку.";
-        try {
-            $job = [
-                'model'       =>  $data['model']??'yandexgpt-lite',
-                'temperature' =>  intval($data['temperature']??0),
-                'instruction' =>  $instruction,
-                'max_tokens'  =>  intval($data['max_tokens']??2000),
-                'query'       => ''
-            ];
-            $dataCdr = CdrText::find(["linkedId=:linkedId:", 'bind' => ['linkedId' => $linkedId] ])->toArray();
-            $waitRecognize = count($dataCdr) === 0;
-            foreach ($dataCdr as $d) {
-                $textData = json_decode($d['text'], true);
-                foreach ($textData as $text) {
-                    $ch = $text['channel']??'';
-                    $job['query'].="О.$ch: ".$text['text'].PHP_EOL;
-                }
-            }
-            unset($dataCdr);
-        }catch (\Throwable $e){
-            $res->messages[] = 'Fail create job...';
-            $this->printResult($res);
-            return;
-        }
-
-        $requestId = '';
-        $res->data['waitRecognize'] = $waitRecognize;
-        if($waitRecognize === false){
-            try {
-                [$waitRecognize, $requestId, $statusCode] = self::sendGptTask($linkedId, $job);
-                $this->response->setStatusCode($statusCode);
-                $res->messages[] = 'Send send job (HTTP)... status: '.$statusCode;
-                $res->data['requestId']  = $requestId;
-                $res->data['statusCode'] = $statusCode;
-            } catch (\Throwable $e) {
-                $res->messages[] = 'Fail send job (HTTP)...';
-                $waitRecognize = true;
-                $this->response->setStatusCode(503);
-            }
-        }
-        $task = GptTasks::findFirst(['linkedId=:linkedId:', 'bind' => ['linkedId' => $linkedId] ]);
-        if(!$task){
-            $task = new GptTasks();
-        }
-        $task->linkedId     = $linkedId;
-        $task->changeTime   = time();
-        $task->waitRecognize= $waitRecognize;
-        $task->requestId    = $requestId;
-        $task->instruction  = json_encode($job);
-        $task->closeTime    = 0;
-
-        try {
-            $res->success = $task->save();
-        }catch (\Throwable $e){
-            $res->messages[] = 'Fail send job (HTTP)...' . $e->getMessage();
-        }
+        $res = ConnectorDb::invoke(ConnectorDb::FUNC_ADD_GPT_TASK, [$data]);
         $this->printResult($res);
     }
 
@@ -220,22 +165,13 @@ class ApiController extends ModulesControllerBase
     }
 
     /**
-     * curl http://127.0.0.1/pbxcore/api/speech-recognize/get-gpt-results?time=1758013611
+     * curl http://127.0.0.1/pbxcore/api/speech-recognize/get-gpt-results?time=1763476467
      */
     public function getGptResults(): void
     {
         $res    = new PBXApiResult();
         $res->success = true;
-
-        $filter = [
-            'changeTime>:changeTime:','bind' => [
-                'changeTime'  => $_REQUEST['time']??time()
-            ],
-            'columns' => 'linkedId,changeTime,waitRecognize,requestId,closeTime,response',
-            'order' => 'changeTime ASC',
-            'limit' => 450
-        ];
-        $res->data = GptTasks::find($filter)->toArray();
+        $res->data = ConnectorDb::invoke(ConnectorDb::FUNC_GPT_RESULTS, [$_REQUEST['time']??time()]);
         $this->printResult($res);
     }
 

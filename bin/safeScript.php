@@ -12,8 +12,13 @@ $voiceConf->installDockerImg();
 $moduleEnabled = $voiceConf->checkStart();
 if($moduleEnabled){
     $sr      = new SpeechRecognizeConf();
+
     $path    = $sr->getDaemonPath();
     $phpPath = Util::which('php');
     Processes::mwExecBg("$phpPath -f $path");
+
+    $path    = $sr->getConnectorDbPath();
+    $phpPath = Util::which('php');
+    Processes::mwExecBg("$phpPath -f $path start");
 }
 

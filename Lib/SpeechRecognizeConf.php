@@ -95,6 +95,11 @@ class SpeechRecognizeConf extends ConfigClass
         return $this->moduleDir.'/bin/SpeechRecognizeDaemon.php';
     }
 
+    public function getConnectorDbPath():string
+    {
+        return $this->moduleDir.'/bin/ConnectorDb.php';
+    }
+
     /**
      * Проверка, разрешено ли распознавание всех разговоров
      * @return bool
@@ -140,61 +145,6 @@ class SpeechRecognizeConf extends ConfigClass
         $res    = new PBXApiResult();
         $res->data[] = 'ddd';
         return $res;
-    }
-
-    public function getCdrDataAction($data):PBXApiResult
-    {
-        $res    = new PBXApiResult();
-        if(isset($data['offset'])){
-            $res->data = $this->getCdrDataByOffset($data);
-        }elseif(isset($data['link-id'])){
-            $res->data = $this->getCdrDataByLinkId($data['link-id']);
-        }else{
-            $res->data[] = $data;
-        }
-
-        $res->success = true;
-        return $res;
-    }
-
-    public function getCdrDataByLinkId($linkedId):array
-    {
-        $rowsData = [];
-        $filter = [
-            'linkedId = :linkedId:',
-            'bind'                => [
-                'linkedId' => $linkedId
-            ],
-            'order'               => 'id',
-        ];
-        $rows = CdrText::find($filter)->toArray();
-        foreach ($rows as $row){
-            if(!isset($rowsData[$row['UNIQUEID']])){
-                continue;
-            }
-            $rowsData[$row['UNIQUEID']]['transcript'] = $row['text']??'';
-        }
-        return array_values($rowsData);
-    }
-
-    /**
-     * @param $data
-     * @return array
-     */
-    public function getCdrDataByOffset($data):array
-    {
-        $filter = [
-            'id>:id:','bind' => [
-                'id'  => $data['offset']??1
-            ],
-            'limit' => $data['limit']??30
-        ];
-        $result = CdrText::find($filter)->toArray();
-        foreach ($result as &$row){
-            $row['transcript'] = $row['text']??'';
-            unset($row['text']);
-        }
-        return $result;
     }
 
     /**

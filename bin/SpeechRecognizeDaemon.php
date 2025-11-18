@@ -46,7 +46,7 @@ class SpeechRecognizeDaemon
 
     public function __construct()
     {
-        $this->logger =  new Logger('SpeechRecognizeDaemon', 'SpeechRecognize');
+        $this->logger =  new Logger('RecognizeDaemon', 'ModuleSpeechRecognize');
         $this->logger->writeInfo('Starting...');
 
         $this->sr = new SpeechRecognizeConf();
