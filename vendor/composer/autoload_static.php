@@ -7,9 +7,20 @@ namespace Composer\Autoload;
 class ComposerStaticInitdb0e7f5f4867f1094b5c4c69668744f9
 {
     public static $prefixLengthsPsr4 = array (
+        'W' => 
+        array (
+            'WebSocket\\' => 10,
+        ),
+        'P' => 
+        array (
+            'Psr\\Log\\' => 8,
+            'Psr\\Http\\Message\\' => 17,
+            'Phrity\\Util\\' => 12,
+            'Phrity\\Net\\' => 11,
+        ),
         'M' => 
         array (
-            'Modules\\ModuleTemplate\\' => 23,
+            'Modules\\ModuleSpeechRecognize\\' => 30,
         ),
         'C' => 
         array (
@@ -18,7 +29,28 @@ class ComposerStaticInitdb0e7f5f4867f1094b5c4c69668744f9
     );
 
     public static $prefixDirsPsr4 = array (
-        'Modules\\ModuleTemplate\\' => 
+        'WebSocket\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/textalk/websocket/lib',
+        ),
+        'Psr\\Log\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/psr/log/Psr/Log',
+        ),
+        'Psr\\Http\\Message\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/psr/http-factory/src',
+            1 => __DIR__ . '/..' . '/psr/http-message/src',
+        ),
+        'Phrity\\Util\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/phrity/util-errorhandler/src',
+        ),
+        'Phrity\\Net\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/phrity/net-uri/src',
+        ),
+        'Modules\\ModuleSpeechRecognize\\' => 
         array (
             0 => '/',
         ),

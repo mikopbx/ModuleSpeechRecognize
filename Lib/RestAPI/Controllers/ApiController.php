@@ -12,6 +12,7 @@ use MikoPBX\Common\Models\PbxSettings;
 use MikoPBX\Core\System\Util;
 use MikoPBX\PBXCoreREST\Controllers\Modules\ModulesControllerBase;
 use MikoPBX\PBXCoreREST\Lib\PBXApiResult;
+use MikoPBX\PBXCoreREST\Services\ApiMetadataRegistry;
 use Modules\ModuleSpeechRecognize\Lib\SpeechRecognizeConf;
 use Modules\ModuleSpeechRecognize\Models\CdrText;
 use Modules\ModuleSpeechRecognize\Models\GptTasks;
@@ -158,15 +159,23 @@ class ApiController extends ModulesControllerBase
         $task->requestId    = $requestId;
         $task->instruction  = json_encode($job);
         $task->closeTime    = 0;
-        $res->success = $task->save();
 
+        try {
+            $res->success = $task->save();
+        }catch (\Throwable $e){
+            $res->messages[] = 'Fail send job (HTTP)...' . $e->getMessage();
+        }
         $this->printResult($res);
     }
 
     public static function sendGptTask(string $id, array $job)
     {
+        if(empty(trim( $job['query']))){
+            return [false, '', 503];
+        }
         $waitRecognize = true;
         $requestId = '';
+
         $key = PbxSettings::getValueByKey('PBXLicense');
         $client = new Client();
         $jsonData = json_encode($job);

@@ -191,7 +191,7 @@ class SpeechRecognizeDaemon
                     $body     = trim(str_replace('```','',$bodyData['result']['text']??''));
                     unset($bodyData);
                     $this->logger->writeInfo("Resilt ".str_replace("\n",'',$body)."..." . $task->linkedId);
-                    $task->changeTime   = time();
+                    $task->changeTime  = time();
                     $task->closeTime   = time();
                     $task->response = $body;
                     $resultSave = $task->save();

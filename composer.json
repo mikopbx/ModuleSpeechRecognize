@@ -1,9 +1,6 @@
 {
     "name": "mikopbx/moduletemplate",
     "description": "ModuleSpeechRecognize",
-    "require": {
-        "mikopbx/core": ">=2020.2.757"
-    },
     "autoload": {
         "psr-4": {
             "Modules\\ModuleSpeechRecognize\\": "/"
@@ -56,5 +53,9 @@
         "platform": {
             "php": "7.4.6"
         }
+    },
+    "require": {
+        "cesargb/php-log-rotation": "^2.6",
+        "textalk/websocket": "^1.5"
     }
 }
