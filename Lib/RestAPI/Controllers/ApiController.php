@@ -12,12 +12,7 @@ use MikoPBX\Common\Models\PbxSettings;
 use MikoPBX\Core\System\Util;
 use MikoPBX\PBXCoreREST\Controllers\Modules\ModulesControllerBase;
 use MikoPBX\PBXCoreREST\Lib\PBXApiResult;
-use MikoPBX\PBXCoreREST\Services\ApiMetadataRegistry;
 use Modules\ModuleSpeechRecognize\bin\ConnectorDb;
-use Modules\ModuleSpeechRecognize\Lib\SpeechRecognizeConf;
-use Modules\ModuleSpeechRecognize\Models\CdrText;
-use Modules\ModuleSpeechRecognize\Models\GptTasks;
-use Modules\ModuleSpeechRecognize\Models\ManualTasks;
 
 class ApiController extends ModulesControllerBase
 {

@@ -16,8 +16,6 @@ use MikoPBX\Modules\Config\ConfigClass;
 use MikoPBX\Modules\PbxExtensionUtils;
 use MikoPBX\PBXCoreREST\Lib\PBXApiResult;
 use Modules\ModuleSpeechRecognize\Lib\RestAPI\Controllers\ApiController;
-use Modules\ModuleSpeechRecognize\Models\CdrText;
-use Modules\ModuleSpeechRecognize\Models\GptTasks;
 use Modules\ModuleSpeechRecognize\Models\ModuleSpeechRecognize;
 use Modules\ModuleSpeechRecognize\Models\RecognizeOperations;
 use Throwable;

@@ -42,6 +42,7 @@ class ConnectorDb extends WorkerBase
     public const FUNC_ADD_MANUAL_TASK = 'addManualTasks';
     public const FUNC_ADD_GPT_TASK = 'addGptTask';
     public const FUNC_GPT_RESULTS = 'getGptResults';
+    public const FUNC_GET_MANUAL_ID = 'getNewManualId';
 
     /**
      * Handles the received signal.
@@ -332,6 +333,18 @@ class ConnectorDb extends WorkerBase
             'limit' => 450
         ];
         return  GptTasks::find($filter)->toArray();
+    }
+
+    public function getNewManualId()
+    {
+        $ids = [];
+        $tasks = ManualTasks::find(['closeTime=0', 'limit' => round(40)]);
+        foreach($tasks as $task){
+            $ids[] = $task->linkedId;
+            $task->closeTime = time();
+            $task->save();
+        }
+        return $ids;
     }
 }
 

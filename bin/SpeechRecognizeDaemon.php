@@ -30,7 +30,6 @@ use Modules\ModuleSpeechRecognize\Lib\SpeechRecognizeConf;
 use Modules\ModuleSpeechRecognize\Models\CdrText;
 use MikoPBX\Core\System\Util;
 use Modules\ModuleSpeechRecognize\Models\RecognizeOperations;
-use Modules\ModuleSpeechRecognize\Models\ManualTasks;
 use Throwable;
 
 class SpeechRecognizeDaemon
@@ -99,14 +98,8 @@ class SpeechRecognizeDaemon
             $updateOffsetInDB = true;
         }else{
             // Выборочное распознавание.
-            $ids = [];
-            $tasks = ManualTasks::find(['closeTime=0', 'limit' => round(self::LIMIT/5)]);
-            foreach($tasks as $task){
-                $ids[] = $task->linkedId;
-                $task->closeTime = time();
-                $task->save();
-            }
-            if(!empty($ids)){
+            $ids = ConnectorDb::invoke(ConnectorDb::FUNC_GET_MANUAL_ID, []);
+            if(is_array($ids) && !empty($ids)){
                 $filter = [
                     'linkedid IN ({linkedid:array}) AND recordingfile<>""',
                     'bind'                => ['linkedid' => $ids],
