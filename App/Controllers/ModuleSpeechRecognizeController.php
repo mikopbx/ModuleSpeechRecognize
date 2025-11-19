@@ -9,8 +9,10 @@ namespace Modules\ModuleSpeechRecognize\App\Controllers;
 use MikoPBX\AdminCabinet\Controllers\BaseController;
 use MikoPBX\Common\Models\CallQueues;
 use MikoPBX\Common\Models\Extensions;
+use MikoPBX\Common\Models\PbxExtensionModules;
 use MikoPBX\Modules\PbxExtensionUtils;
 use Modules\ModuleSpeechRecognize\App\Forms\ModuleSpeechRecognizeForm;
+use Modules\ModuleSpeechRecognize\bin\ConnectorDb;
 use Modules\ModuleSpeechRecognize\Models\ModuleSpeechRecognize;
 
 class ModuleSpeechRecognizeController extends BaseController
@@ -98,18 +100,23 @@ class ModuleSpeechRecognizeController extends BaseController
         $headerCollectionCSS->addCss("css/cache/{$this->moduleUniqueID}/module-speech-recognize.css", true);
         $headerCollectionCSS->addCss('css/vendor/datatable/dataTables.semanticui.min.css', true);
 
-        $settings = ModuleSpeechRecognize::findFirst();
+        $settings = null;
+        $moduleSettings = PbxExtensionModules::findFirst(["uniqid='$this->moduleUniqueID'",'columns' => ['disabled']]);
+        if(intval($moduleSettings->disabled) === 0){
+            $settings = (object)(ConnectorDb::invoke(ConnectorDb::FUNC_GET_SETTINGS));
+            if (empty($settings)) {
+                $settings = null;
+            }
+        }
+        if(!$settings){
+            $settings = ModuleSpeechRecognize::findFirst();
+        }
         if ($settings === null) {
             $settings = new ModuleSpeechRecognize();
         }
-
         $options = [];
         $this->view->form = new ModuleSpeechRecognizeForm($settings, $options);
         $this->view->pick("{$this->moduleDir}/App/Views/index");
-
-        // Список выбора очередей.
-        $this->view->queues = CallQueues::find(['columns' => ['id', 'name']]);
-        $this->view->users  = Extensions::find(["type = 'SIP'", 'columns' => ['number', 'callerid']]);
     }
 
     /**
@@ -118,11 +125,14 @@ class ModuleSpeechRecognizeController extends BaseController
     public function saveAction() :void
     {
         $data       = $this->request->getPost();
-        $record = ModuleSpeechRecognize::findFirst();
+        $record = (object)(ConnectorDb::invoke(ConnectorDb::FUNC_GET_SETTINGS));
+        if (empty($record)) {
+            $record = ModuleSpeechRecognize::findFirst();
+        }
         if ($record === null) {
             $record = new ModuleSpeechRecognize();
+            $record = (object)$record->toArray();
         }
-        $this->db->begin();
         foreach ($record as $key => $value) {
             switch ($key) {
                 case 'cdr_offset':
@@ -145,17 +155,32 @@ class ModuleSpeechRecognizeController extends BaseController
             }
         }
 
-        if ($record->save() === FALSE) {
+        $result = false;
+        $moduleSettings = PbxExtensionModules::findFirst(["uniqid='$this->moduleUniqueID'",'columns' => ['disabled']]);
+        if(intval($moduleSettings->disabled) === 0){
+            $result = ConnectorDb::invoke(ConnectorDb::FUNC_UPDATE_SETTINGS, [(array)$record]);
+            $result = empty($result)?false:$result[0];
+        }
+        if(!$result){
+            $settings = ModuleSpeechRecognize::findFirst();
+            if(!$settings){
+                $settings = new ModuleSpeechRecognize();
+            }
+            foreach ($record as $key => $value) {
+                $settings->$key = $value;
+            }
+            $result = $settings->save();
+        }
+
+        if ($result === false) {
             $errors = $record->getMessages();
             $this->flash->error(implode('<br>', $errors));
             $this->view->success = false;
-            $this->db->rollback();
             return;
         }
 
         $this->flash->success($this->translation->_('ms_SuccessfulSaved'));
         $this->view->success = true;
-        $this->db->commit();
     }
 
     /**

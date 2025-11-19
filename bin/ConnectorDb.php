@@ -194,7 +194,7 @@ class ConnectorDb extends WorkerBase
             if($retVal){
                 $req['need-ret'] = true;
                 $pathToData = self::saveInTmpFile($req);
-                $result = $client->request($pathToData, 20);
+                $result = $client->request($pathToData, 5);
             }else{
                 $pathToData = self::saveInTmpFile($req);
                 $client->publish($pathToData);
