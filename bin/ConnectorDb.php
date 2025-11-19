@@ -46,6 +46,7 @@ class ConnectorDb extends WorkerBase
     public const FUNC_ADD_GPT_TASK = 'addGptTask';
     public const FUNC_GPT_RESULTS = 'getGptResults';
     public const FUNC_GPT_OPEN_TASKS = 'getOpenGptTasks';
+    public const FUNC_GPT_OPEN_TASKS_WAITING = 'getOpenGptTasksWaiting';
     public const FUNC_UPDATE_GPT_TASK = 'updateGptTasks';
     public const FUNC_GET_MANUAL_ID = 'getNewManualId';
     public const FUNC_SAVE_RESULT_SEND_RECOGNIZE = 'sendToRecognizeSaveResult';
@@ -428,9 +429,19 @@ class ConnectorDb extends WorkerBase
     public function getOpenGptTasks()
     {
         $filter = [
+            'closeTime=0 AND requestId=""',
+            'order' => 'changeTime ASC',
+            'limit' => 1000
+        ];
+        return GptTasks::find($filter)->toArray();
+    }
+
+    public function getOpenGptTasksWaiting()
+    {
+        $filter = [
             'closeTime=0',
             'order' => 'changeTime ASC',
-            'limit' => 100
+            'limit' => 1000
         ];
         return GptTasks::find($filter)->toArray();
     }

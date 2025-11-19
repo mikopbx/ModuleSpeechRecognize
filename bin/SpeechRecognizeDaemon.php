@@ -117,7 +117,14 @@ class SpeechRecognizeDaemon
             // Блокировка частых запросов.
             return;
         }
+        $tasks = ConnectorDb::invoke(ConnectorDb::FUNC_GPT_OPEN_TASKS_WAITING, []);
+        $this->startGetGptResponsePart2($tasks);
         $tasks = ConnectorDb::invoke(ConnectorDb::FUNC_GPT_OPEN_TASKS, []);
+        $this->startGetGptResponsePart2($tasks);
+    }
+
+    private function startGetGptResponsePart2($tasks)
+    {
         foreach($tasks as $srcTask){
             $task = (object) $srcTask;
 
