@@ -21,6 +21,7 @@ namespace Modules\ModuleSpeechRecognize\bin;
 require_once 'Globals.php';
 
 use MikoPBX\Core\System\BeanstalkClient;
+use MikoPBX\Core\System\SystemMessages;
 use MikoPBX\Core\System\Util;
 use MikoPBX\Core\Workers\WorkerBase;
 use MikoPBX\PBXCoreREST\Lib\PBXApiResult;
@@ -29,6 +30,8 @@ use Modules\ModuleSpeechRecognize\Lib\Logger;
 use Modules\ModuleSpeechRecognize\Models\CdrText;
 use Modules\ModuleSpeechRecognize\Models\GptTasks;
 use Modules\ModuleSpeechRecognize\Models\ManualTasks;
+use Modules\ModuleSpeechRecognize\Models\ModuleSpeechRecognize;
+use Modules\ModuleSpeechRecognize\Models\RecognizeOperations;
 
 class ConnectorDb extends WorkerBase
 {
@@ -42,7 +45,18 @@ class ConnectorDb extends WorkerBase
     public const FUNC_ADD_MANUAL_TASK = 'addManualTasks';
     public const FUNC_ADD_GPT_TASK = 'addGptTask';
     public const FUNC_GPT_RESULTS = 'getGptResults';
+    public const FUNC_GPT_OPEN_TASKS = 'getOpenGptTasks';
+    public const FUNC_UPDATE_GPT_TASK = 'updateGptTasks';
     public const FUNC_GET_MANUAL_ID = 'getNewManualId';
+    public const FUNC_SAVE_RESULT_SEND_RECOGNIZE = 'sendToRecognizeSaveResult';
+    public const FUNC_GET_SETTINGS = 'getSettings';
+    public const FUNC_UPDATE_SETTINGS = 'updateSettings';
+    public const FUNC_GET_TEXT_BY_ID= 'getCdrTextById';
+    public const FUNC_GET_TEXT_BY_UNIQUEID= 'getCdrTextByUid';
+    public const FUNC_UPD_CDR_TEXT = 'updateCdrText';
+    public const FUNC_GET_RECOGNIZE_OPERATIONS= 'getRecognizeOperations';
+    public const FUNC_DEL_RECOGNIZE_OPERATIONS= 'deleteRecognizeOperations';
+    public const FUNC_UPD_RECOGNIZE_OPERATIONS= 'updateFailRecognizeOperations';
 
     /**
      * Handles the received signal.
@@ -89,21 +103,26 @@ class ConnectorDb extends WorkerBase
             }else{
                 $data = json_decode($pathToData, true, 512, JSON_THROW_ON_ERROR);
             }
-        }catch (Exception $e){
+        }catch (\Throwable $e){
+            $this->logger->writeError($e->getMessage(), 'Invoke command');
             return;
         }
         $res_data = [];
         if($data['action'] === 'invoke'){
             $this->logger->writeInfo($data, 'Get command');
-
             $funcName = $data['function']??'';
             if(method_exists($this, $funcName)){
-                if(count($data['args']) === 0){
-                    $res_data = $this->$funcName();
-                }else{
-                    $res_data = $this->$funcName(...$data['args']??[]);
+                try {
+                    if(count($data['args']) === 0){
+                        $res_data = $this->$funcName();
+                    }else{
+                        $res_data = $this->$funcName(...$data['args']??[]);
+                    }
+                    $res_data = self::saveInTmpFile($res_data);
+                }catch (\Throwable $e){
+                    $this->logger->writeError($e->getMessage(), 'Invoke command');
+                    return;
                 }
-                $res_data = self::saveInTmpFile($res_data);
             }
         }
         $tube->reply($res_data);
@@ -179,7 +198,7 @@ class ConnectorDb extends WorkerBase
             }else{
                 $pathToData = self::saveInTmpFile($req);
                 $client->publish($pathToData);
-                return true;
+                return [true];
             }
             if(file_exists($result)){
                 $object = json_decode(file_get_contents($result), true);
@@ -335,6 +354,8 @@ class ConnectorDb extends WorkerBase
         return  GptTasks::find($filter)->toArray();
     }
 
+    // DAEMON WORKER
+
     public function getNewManualId()
     {
         $ids = [];
@@ -345,6 +366,154 @@ class ConnectorDb extends WorkerBase
             $task->save();
         }
         return $ids;
+    }
+
+    public function sendToRecognizeSaveResult(array $dataCdr, string $result){
+        $filter = [
+            'UNIQUEID=:UNIQUEID:','bind' => [
+                'UNIQUEID'  => $dataCdr['UNIQUEID']
+            ]
+        ];
+        /** @var RecognizeOperations $operation */
+        $operation = RecognizeOperations::findFirst($filter);
+        if(!$operation){
+            $operation = new RecognizeOperations();
+        }
+        $operation->filename  = $dataCdr['recordingfile'];
+        $operation->operation = trim($result);
+        $operation->linkedId  = $dataCdr['linkedid'];
+        $operation->time = time();
+        foreach ($operation->toArray() as $key => $value) {
+            if(isset($dataCdr[$key])){
+                $operation->$key = $dataCdr[$key];
+            }
+        }
+        return [$operation->save()];
+    }
+
+    public function getSettings()
+    {
+        return ModuleSpeechRecognize::findFirst()->toArray();
+    }
+
+    public function getCdrTextById($linkedId)
+    {
+        return CdrText::find(["linkedId=:linkedId:", 'bind' => ['linkedId' => $linkedId] ])->toArray();
+    }
+
+    public function getCdrTextByUid($uid)
+    {
+        return CdrText::find(["UNIQUEID=:id:", 'bind' => ['id' => $uid] ])->toArray();
+    }
+
+    public function updateCdrText($dataCdr)
+    {
+        $this->logger->writeInfo([$dataCdr], 'Create CdrText');
+        $data = new CdrText();
+        try {
+            foreach ($data as $key => $value) {
+                if($key === 'id'){
+                    continue;
+                }
+                if(isset($dataCdr[$key])){
+                    $data->$key = $dataCdr[$key];
+                }
+            }
+        }catch (\Throwable $e){
+            SystemMessages::sysLogMsg(__CLASS__, $e->getMessage());
+        }
+        return [$data->save()];
+    }
+
+    public function getOpenGptTasks()
+    {
+        $filter = [
+            'closeTime=0',
+            'order' => 'changeTime ASC',
+            'limit' => 100
+        ];
+        return GptTasks::find($filter)->toArray();
+    }
+
+    public function updateGptTasks($data)
+    {
+        $filter = [
+            'id=:id:',
+            'bind' => ['id' => $data['id']??'']
+        ];
+        $task = GptTasks::findFirst($filter);
+        if(!$task){
+            return [false];
+        }
+        foreach ($data as $key => $value) {
+            $task->$key = $value;
+        }
+        return [$task->save()];
+    }
+
+    private function updateSettings($data)
+    {
+        /** @var ModuleSpeechRecognize $settings */
+        $settings = ModuleSpeechRecognize::findFirst();
+        $keys = array_keys($data);
+        if(!$settings){
+            $settings = new ModuleSpeechRecognize();
+        }
+        foreach ($data as $key => $value) {
+            if(!in_array($key, $keys)){
+                continue;
+            }
+            $settings->$key = $value;
+        }
+        return [$settings->save()];
+    }
+
+
+    public function getRecognizeOperations()
+    {
+        $timestamp = time()-4;
+        $filter = [
+            'time<:time:','bind' => [
+                'time'  => $timestamp
+            ],
+            'order' => 'id DESC',
+            'limit' => '50'
+        ];
+        /** @var RecognizeOperations $task */
+        return RecognizeOperations::find($filter)->toArray();
+    }
+
+    public function deleteRecognizeOperations($id)
+    {
+        $result = true;
+        $filter = [
+            'id=:id:',
+            'bind' => ['id' => $id]
+        ];
+        $operation = RecognizeOperations::findFirst($filter);
+        if($operation){
+            $result = $operation->delete();
+        }
+        return [$result];
+    }
+
+    public function updateFailRecognizeOperations($data)
+    {
+        $filter = [
+            'UNIQUEID=:UNIQUEID:',
+            'bind' => [
+                'UNIQUEID'  => $data['UNIQUEID']
+            ]
+        ];
+        /** @var RecognizeOperations $operations */
+        $operations = RecognizeOperations::findFirst($filter);
+        if(!$operations){
+            $operations = new RecognizeOperations();
+            $operations->UNIQUEID = $data['UNIQUEID'];
+            $operations->linkedId = $data['linkedid'];
+        }
+        $operations->fail = 1;
+        return [$operations->save()];
     }
 }
 

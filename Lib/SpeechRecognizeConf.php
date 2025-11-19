@@ -8,16 +8,14 @@
 
 namespace Modules\ModuleSpeechRecognize\Lib;
 
-use MikoPBX\Common\Providers\CDRDatabaseProvider;
 use MikoPBX\Core\System\Configs\CronConf;
 use MikoPBX\Core\System\Processes;
 use MikoPBX\Core\System\Util;
 use MikoPBX\Modules\Config\ConfigClass;
 use MikoPBX\Modules\PbxExtensionUtils;
 use MikoPBX\PBXCoreREST\Lib\PBXApiResult;
+use Modules\ModuleSpeechRecognize\bin\ConnectorDb;
 use Modules\ModuleSpeechRecognize\Lib\RestAPI\Controllers\ApiController;
-use Modules\ModuleSpeechRecognize\Models\ModuleSpeechRecognize;
-use Modules\ModuleSpeechRecognize\Models\RecognizeOperations;
 use Throwable;
 
 class SpeechRecognizeConf extends ConfigClass
@@ -65,8 +63,8 @@ class SpeechRecognizeConf extends ConfigClass
      */
     public function getSettings(): void
     {
-        $settings = ModuleSpeechRecognize::findFirst();
-        if ($settings === null) {
+        $settings = (object)(ConnectorDb::invoke(ConnectorDb::FUNC_GET_SETTINGS));
+        if (empty($settings)) {
             return;
         }
         $this->apiKey = $settings->apiKey;
@@ -298,26 +296,7 @@ class SpeechRecognizeConf extends ConfigClass
         ];
 
         $result = shell_exec(implode(' ', $params));
-        $filter = [
-            'UNIQUEID=:UNIQUEID:','bind' => [
-                'UNIQUEID'  => $dataCdr['UNIQUEID']
-            ]
-        ];
-        /** @var RecognizeOperations $operation */
-        $operation = RecognizeOperations::findFirst($filter);
-        if(!$operation){
-            $operation = new RecognizeOperations();
-        }
-        $operation->filename  = $dataCdr['recordingfile'];
-        $operation->operation = trim($result);
-        $operation->linkedId  = $dataCdr['linkedid'];
-        $operation->time = time();
-        foreach ($operation->toArray() as $key => $value) {
-            if(isset($dataCdr[$key])){
-                $operation->$key = $dataCdr[$key];
-            }
-        }
-        $operation->save();
+        ConnectorDb::invoke(ConnectorDb::FUNC_SAVE_RESULT_SEND_RECOGNIZE, [$dataCdr,$result]);
     }
 
     /**

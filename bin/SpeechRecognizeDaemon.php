@@ -21,15 +21,10 @@ namespace Modules\ModuleSpeechRecognize\bin;
 require_once('Globals.php');
 
 use MikoPBX\Common\Providers\CDRDatabaseProvider;
-use MikoPBX\Core\System\SystemMessages;
 use Modules\ModuleSpeechRecognize\Lib\Logger;
 use Modules\ModuleSpeechRecognize\Lib\RestAPI\Controllers\ApiController;
-use Modules\ModuleSpeechRecognize\Models\GptTasks;
-use Modules\ModuleSpeechRecognize\Models\ModuleSpeechRecognize;
 use Modules\ModuleSpeechRecognize\Lib\SpeechRecognizeConf;
-use Modules\ModuleSpeechRecognize\Models\CdrText;
 use MikoPBX\Core\System\Util;
-use Modules\ModuleSpeechRecognize\Models\RecognizeOperations;
 use Throwable;
 
 class SpeechRecognizeDaemon
@@ -122,15 +117,12 @@ class SpeechRecognizeDaemon
             // Блокировка частых запросов.
             return;
         }
-        $filter = [
-            'closeTime=0',
-            'order' => 'changeTime ASC',
-            'limit' => 100
-        ];
-        $tasks = GptTasks::find($filter);
-        foreach($tasks as $task){
+        $tasks = ConnectorDb::invoke(ConnectorDb::FUNC_GPT_OPEN_TASKS, []);
+        foreach($tasks as $srcTask){
+            $task = (object) $srcTask;
+
             $this->logger->writeInfo('Starting manual tasks GPT...' . $task->linkedId);
-            $dataCdr = CdrText::find(["linkedId=:linkedId:", 'bind' => ['linkedId' => $task->linkedId] ])->toArray();
+            $dataCdr = ConnectorDb::invoke(ConnectorDb::FUNC_GET_TEXT_BY_ID, [$task->linkedId]);
             if(intval($task->waitRecognize) === 1){
                 $waitRecognize = count($dataCdr) === 0;
                 if($waitRecognize){
@@ -163,7 +155,10 @@ class SpeechRecognizeDaemon
                 $task->waitRecognize= false;
                 $task->requestId    = $requestId;
                 $task->changeTime   = time();
-                $resultSave = $task->save();
+
+                $resultSave = ConnectorDb::invoke(ConnectorDb::FUNC_UPDATE_GPT_TASK, [(array)$task]);
+                $resultSave = empty($resultSave)?false:$resultSave[0];
+
                 $this->logger->writeInfo("Result update db data $resultSave..." . $task->linkedId);
             }else{
                 $this->logger->writeInfo("Get result GPT..." . $task->linkedId);
@@ -187,7 +182,10 @@ class SpeechRecognizeDaemon
                     $task->changeTime  = time();
                     $task->closeTime   = time();
                     $task->response = $body;
-                    $resultSave = $task->save();
+
+                    $resultSave = ConnectorDb::invoke(ConnectorDb::FUNC_UPDATE_GPT_TASK, [(array)$task]);
+                    $resultSave = empty($resultSave)?false:$resultSave[0];
+
                     $this->logger->writeInfo("Result update db data $resultSave..." . $task->linkedId);
                 }else{
                     $this->logger->writeError('Error get result job to GPT ... code:'.$statusCode.", " . $task->linkedId);
@@ -205,25 +203,17 @@ class SpeechRecognizeDaemon
         if(!$this->sr->useLongRecognize()){
             return;
         }
-        $timestamp = time()-4;
-        $filter = [
-            'time<:time:','bind' => [
-                'time'  => $timestamp
-            ],
-            'order' => 'id DESC',
-            'limit' => '50'
-        ];
-        /** @var RecognizeOperations $task */
-        $operations = RecognizeOperations::find($filter);
-        foreach ($operations as $task){
+        $operations = ConnectorDb::invoke(ConnectorDb::FUNC_GET_RECOGNIZE_OPERATIONS, []);
+        foreach ($operations as $srcTask){
+            $task = (object)$srcTask;
             $response = $this->sr->getLongRecognizeResponse($task->operation, $task->filename);
             if(empty($response)){
                 $task->fail = 1;
             }else{
-                if($this->saveResponse($response, $task->toArray())){
+                if($this->saveResponse($response, (array)$task, $task->linkedId)){
                     continue;
                 }
-                $task->delete();
+                ConnectorDb::invoke(ConnectorDb::FUNC_DEL_RECOGNIZE_OPERATIONS, [$task->id]);
             }
             usleep(50000);
         }
@@ -236,27 +226,15 @@ class SpeechRecognizeDaemon
      * @param $linkedId
      * @return bool
      */
-    private function saveResponse($response, $dataCdr):bool
+    private function saveResponse($response, $dataCdr, $linkedid):bool
     {
         $result = false;
         $data = $this->getCdrTextByUid($dataCdr['UNIQUEID']);
         if(!$data){
-            $data = new CdrText();
-            try {
-                $data->text = json_encode($response, JSON_THROW_ON_ERROR);
-                $data->linkedId = $dataCdr['linkedid'];
-                foreach ($data as $key => $value) {
-                    if($key === 'id'){
-                        continue;
-                    }
-                    if(isset($dataCdr[$key])){
-                        $data->$key = $dataCdr[$key];
-                    }
-                }
-            }catch (Throwable $e){
-                SystemMessages::sysLogMsg(__CLASS__, $e->getMessage());
-            }
-            $result = $data->save();
+            $dataCdr['text']     = json_encode($response, JSON_THROW_ON_ERROR);
+            $dataCdr['linkedId'] = $linkedid;
+            $res = ConnectorDb::invoke(ConnectorDb::FUNC_UPD_CDR_TEXT, [$dataCdr]);
+            $result = empty($res)?false:$res[0];
         }
         return $result;
     }
@@ -264,18 +242,15 @@ class SpeechRecognizeDaemon
     /**
      * Возвращает сохраненный результат распознванаия.
      * @param string $uid
-     * @return ?CdrText
+     * @return ?object
      */
-    private function getCdrTextByUid(string $uid):?CdrText
+    private function getCdrTextByUid(string $uid)
     {
-        $filter = [
-            'UNIQUEID=:uid:',
-            'bind' => [
-                'uid'  => $uid
-            ]
-        ];
-        /** @var CdrText $data */
-        return CdrText::findFirst($filter);
+        $res = ConnectorDb::invoke(ConnectorDb::FUNC_GET_TEXT_BY_UNIQUEID, [$uid]);
+        if(empty($res) || !is_array($res)){
+            return null;
+        }
+        return (object)$res;
     }
 
     /**
@@ -300,23 +275,9 @@ class SpeechRecognizeDaemon
             }else{
                 $response = $this->sr->recognize($data['recordingfile']);
                 $this->logger->writeInfo('Transcribe...' .$data['linkedid'].':'. $data['recordingfile'] . json_encode($response, JSON_THROW_ON_ERROR));
-                $result   = $this->saveResponse($response, $data);
+                $result   = $this->saveResponse($response, $data, $data['linkedid']);
                 if(!$result){
-                    $filter = [
-                        'UNIQUEID=:UNIQUEID:',
-                        'bind' => [
-                            'UNIQUEID'  => $data['UNIQUEID']
-                        ]
-                    ];
-                    /** @var RecognizeOperations $operations */
-                    $operations = RecognizeOperations::findFirst($filter);
-                    if(!$operations){
-                        $operations = new RecognizeOperations();
-                        $operations->UNIQUEID = $data['UNIQUEID'];
-                        $operations->linkedId = $data['linkedid'];
-                    }
-                    $operations->fail = 1;
-                    $operations->save();
+                    ConnectorDb::invoke(ConnectorDb::FUNC_UPD_RECOGNIZE_OPERATIONS, [$data], false);
                 }
             }
             usleep(100000);
@@ -330,10 +291,7 @@ class SpeechRecognizeDaemon
     private function updateOffsetInDB($newOffset):void
     {
         $this->offset = $newOffset;
-        /** @var ModuleSpeechRecognize $settings */
-        $settings = ModuleSpeechRecognize::findFirst();
-        $settings->cdr_offset = $this->offset;
-        $settings->save();
+        ConnectorDb::invoke(ConnectorDb::FUNC_UPDATE_SETTINGS, [['cdr_offset' => $this->offset]], false);
     }
 
 }

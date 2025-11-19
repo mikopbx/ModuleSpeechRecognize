@@ -18,7 +18,7 @@ class ApiController extends ModulesControllerBase
 {
     /**
      * curl 'http://127.0.0.1/pbxcore/api/speech-recognize/get-cdr-data?limit=2&offset=0'
-     * curl 'http://127.0.0.1/pbxcore/api/speech-recognize/get-cdr-data?link-id=mikopbx-1763473523.9'
+     * curl 'http://127.0.0.1/pbxcore/api/speech-recognize/get-cdr-data?link-id=mikopbx-1763544495.12'
      */
     public function getCdrData(): void
     {
@@ -56,7 +56,7 @@ class ApiController extends ModulesControllerBase
     }
 
     /**
-     * curl 'http://127.0.0.1/pbxcore/api/speech-recognize/add-manual-task?linkedid=mikopbx-1763473523.9'
+     * curl 'http://127.0.0.1/pbxcore/api/speech-recognize/add-manual-task?linkedid=mikopbx-1763544495.12'
      * @return void
      */
     public function addManualTasks()
@@ -80,7 +80,7 @@ class ApiController extends ModulesControllerBase
       "instruction": "Верни ответ в JSON формате. в запросе телефонный разговор в виде текста\nО.НомерКанала: Реплика ПереводСтроки\nО.НомерКанала: Реплика ПереводСтроки\nПроанализируй реплики. Требуется получить ответы в виде JSON и дозаполнить поля comment, resultBoolean, resultArray\n{\n  \"q1\": {q: \"Задавал ли менеджер вопрос – Когда планируется приобретение?\", comment: \"\", resultBoolean: true},\n  \"q2\": {q: \"Какая номенклатура (товары упоминались), верни массив значений\", comment: \"\", resultArray: true}\n}",
       "temperature": 0,
       "max_tokens": 2000,
-      "id": "mikopbx-1763473523.9"
+      "id": "mikopbx-1763544495.12"
      }'
      *
      * Наполняется таблица задач.
@@ -96,8 +96,6 @@ class ApiController extends ModulesControllerBase
             $this->printResult($res);
             return;
         }
-
-        $this->printResult($data);
         $linkedId = $data['id']??'';
         if(empty($linkedId)){
             $res->messages[] = 'ID is empty...';
