@@ -23,17 +23,21 @@ class ApiController extends ModulesControllerBase
     public function getCdrData(): void
     {
         $data = $_REQUEST;
-        $result    = new PBXApiResult();
-        if(isset($data['offset'])){
-            $offset = intval($data['offset']??0);
-            $limit  = intval($data['limit']??30);
-            $result->data = ConnectorDb::invoke(ConnectorDb::FUNC_CDR_BY_OFFSET, [$offset, $limit]);
-        }elseif(isset($data['link-id'])){
-            $result->data = ConnectorDb::invoke(ConnectorDb::FUNC_CDR_BY_ID, [$data['link-id']]);
-        }else{
-            $result->data[] = $data;
+        $result = new PBXApiResult();
+        try {
+            if (isset($data['offset'])) {
+                $offset = intval($data['offset'] ?? 0);
+                $limit  = intval($data['limit'] ?? 30);
+                $result->data = ConnectorDb::invoke(ConnectorDb::FUNC_CDR_BY_OFFSET, [$offset, $limit]) ?: [];
+            } elseif (isset($data['link-id'])) {
+                $result->data = ConnectorDb::invoke(ConnectorDb::FUNC_CDR_BY_ID, [$data['link-id']]) ?: [];
+            } else {
+                $result->data[] = $data;
+            }
+            $result->success = true;
+        } catch (\Throwable $e) {
+            $result->messages[] = $e->getMessage();
         }
-        $result->success = true;
         $this->printResult($result);
     }
 
@@ -61,14 +65,18 @@ class ApiController extends ModulesControllerBase
      */
     public function addManualTasks()
     {
-        $res    = new PBXApiResult();
-        $linkedId = $_REQUEST['linkedid']??'';
-        if(empty($linkedId)){
+        $res = new PBXApiResult();
+        $linkedId = $_REQUEST['linkedid'] ?? '';
+        if (empty($linkedId)) {
             $res->messages[] = 'linkedid is empty';
             $this->printResult($res);
             return;
         }
-        $res = ConnectorDb::invoke(ConnectorDb::FUNC_ADD_MANUAL_TASK, [$linkedId]);
+        try {
+            $res = ConnectorDb::invoke(ConnectorDb::FUNC_ADD_MANUAL_TASK, [$linkedId]);
+        } catch (\Throwable $e) {
+            $res->messages[] = $e->getMessage();
+        }
         $this->printResult($res);
     }
 
@@ -96,13 +104,17 @@ class ApiController extends ModulesControllerBase
             $this->printResult($res);
             return;
         }
-        $linkedId = $data['id']??'';
-        if(empty($linkedId)){
+        $linkedId = $data['id'] ?? '';
+        if (empty($linkedId)) {
             $res->messages[] = 'ID is empty...';
             $this->printResult($res);
             return;
         }
-        $res = ConnectorDb::invoke(ConnectorDb::FUNC_ADD_GPT_TASK, [$data]);
+        try {
+            $res = ConnectorDb::invoke(ConnectorDb::FUNC_ADD_GPT_TASK, [$data]);
+        } catch (\Throwable $e) {
+            $res->messages[] = $e->getMessage();
+        }
         $this->printResult($res);
     }
 
@@ -162,9 +174,13 @@ class ApiController extends ModulesControllerBase
      */
     public function getGptResults(): void
     {
-        $res    = new PBXApiResult();
-        $res->success = true;
-        $res->data = ConnectorDb::invoke(ConnectorDb::FUNC_GPT_RESULTS, [$_REQUEST['time']??time()]);
+        $res = new PBXApiResult();
+        try {
+            $res->data = ConnectorDb::invoke(ConnectorDb::FUNC_GPT_RESULTS, [$_REQUEST['time'] ?? time()]) ?: [];
+            $res->success = true;
+        } catch (\Throwable $e) {
+            $res->messages[] = $e->getMessage();
+        }
         $this->printResult($res);
     }
 

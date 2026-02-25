@@ -202,7 +202,7 @@ class ConnectorDb extends WorkerBase
                 return [true];
             }
             if(file_exists($result)){
-                $object = json_decode(file_get_contents($result), true);
+                $object = json_decode(file_get_contents($result), true) ?? [];
             }else{
                 $object = [];
             }
