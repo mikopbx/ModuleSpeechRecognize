@@ -58,6 +58,7 @@ class ConnectorDb extends WorkerBase
     public const FUNC_GET_RECOGNIZE_OPERATIONS= 'getRecognizeOperations';
     public const FUNC_DEL_RECOGNIZE_OPERATIONS= 'deleteRecognizeOperations';
     public const FUNC_UPD_RECOGNIZE_OPERATIONS= 'updateFailRecognizeOperations';
+    private const MAX_INLINE_PAYLOAD_BYTES = 512;
 
     /**
      * Handles the received signal.
@@ -96,21 +97,43 @@ class ConnectorDb extends WorkerBase
      */
     public function onEvents($tube): void
     {
+        $jsonBody = null;
+        $payloadSource = 'inline';
+        $payloadPreview = '';
+        $payloadFilePath = '';
         try {
             $pathToData = $tube->getBody();
             if(file_exists($pathToData)) {
-                $data = json_decode(file_get_contents($pathToData), true, 512, JSON_THROW_ON_ERROR);
-                unlink($pathToData);
+                $payloadSource = 'file';
+                $payloadFilePath = $pathToData;
+                $jsonBody = file_get_contents($pathToData);
+                if ($jsonBody === false) {
+                    throw new \RuntimeException('Unable to read payload file');
+                }
             }else{
-                $data = json_decode($pathToData, true, 512, JSON_THROW_ON_ERROR);
+                $trimmedBody = trim((string)$pathToData);
+                $isJsonInline = $trimmedBody !== '' && in_array($trimmedBody[0], ['{', '['], true);
+                if (!$isJsonInline) {
+                    throw new \RuntimeException('Payload file not found');
+                }
+                $jsonBody = $pathToData;
+            }
+            $payloadPreview = mb_substr((string)$jsonBody, 0, 512);
+            $data = json_decode((string)$jsonBody, true, 512, JSON_THROW_ON_ERROR);
+            if ($payloadSource === 'file' && $payloadFilePath !== '' && file_exists($payloadFilePath)) {
+                unlink($payloadFilePath);
             }
         }catch (\Throwable $e){
-            $this->logger->writeError($e->getMessage(), 'Invoke command');
+            $this->logger->writeError([
+                'message' => $e->getMessage(),
+                'payload_source' => $payloadSource,
+                'payload_size' => is_string($jsonBody) ? strlen($jsonBody) : 0,
+                'payload_preview' => $payloadPreview,
+            ], 'Invoke command');
             return;
         }
         $res_data = [];
         if($data['action'] === 'invoke'){
-            $this->logger->writeInfo($data, 'Get command');
             $funcName = $data['function']??'';
             if(method_exists($this, $funcName)){
                 try {
@@ -163,11 +186,16 @@ class ConnectorDb extends WorkerBase
                 $downloadCacheDir = '';
             }
         }
-        $fileBaseName = md5(microtime(true));
         // "temp-" in the filename is necessary for the file to be automatically deleted after 5 minutes.
-        $filename = $tmpDir . '/temp-' . $fileBaseName;
-        file_put_contents($filename, $res_data);
+        $filename = tempnam($tmpDir, 'temp-');
+        if ($filename === false) {
+            return '';
+        }
+        if (file_put_contents($filename, $res_data, LOCK_EX) === false) {
+            return '';
+        }
         if (!empty($downloadCacheDir)) {
+            $fileBaseName = basename($filename);
             $linkName = $downloadCacheDir . '/' . $fileBaseName;
             // For automatic file deletion.
             // A file with such a symlink will be deleted after 5 minutes by cron.
@@ -194,11 +222,23 @@ class ConnectorDb extends WorkerBase
         try {
             if($retVal){
                 $req['need-ret'] = true;
-                $pathToData = self::saveInTmpFile($req);
-                $result = $client->request($pathToData, 5);
+            }
+            $requestPayload = '';
+            try {
+                $reqBody = json_encode($req, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                if (is_string($reqBody) && strlen($reqBody) <= self::MAX_INLINE_PAYLOAD_BYTES) {
+                    $requestPayload = $reqBody;
+                }
+            } catch (\Throwable $e) {
+                $requestPayload = '';
+            }
+            if ($requestPayload === '') {
+                $requestPayload = self::saveInTmpFile($req);
+            }
+            if($retVal){
+                $result = $client->request($requestPayload, 5);
             }else{
-                $pathToData = self::saveInTmpFile($req);
-                $client->publish($pathToData);
+                $client->publish($requestPayload);
                 return [true];
             }
             if(file_exists($result)){
