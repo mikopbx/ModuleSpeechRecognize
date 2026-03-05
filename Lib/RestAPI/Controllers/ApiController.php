@@ -128,7 +128,14 @@ class ApiController extends ModulesControllerBase
 
         $key = PbxSettings::getValueByKey('PBXLicense');
         $client = new Client();
-        $jsonData = json_encode($job);
+        try {
+            $jsonData = json_encode(
+                $job,
+                JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
+            );
+        } catch (\Throwable $e) {
+            return [true, '', 422];
+        }
         $response = $client->post('https://speech.mikolab.ru/v1/gpt/completionAsync', [
             'headers' => [
                 'Content-Type' => 'application/json',

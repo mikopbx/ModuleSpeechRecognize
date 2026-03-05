@@ -70,11 +70,25 @@ class Logger
     }
 
     /**
+     * Ensures base log file exists and stream points to it.
+     * @return void
+     */
+    private function ensureActiveLogFile(): void
+    {
+        clearstatcache(true, $this->logFile);
+        if (!file_exists($this->logFile)) {
+            @file_put_contents($this->logFile, '', FILE_APPEND | LOCK_EX);
+            $this->init();
+        }
+    }
+
+    /**
      * Ротация лог файла.
      * @return void
      */
     public function rotate(): void
     {
+        $this->ensureActiveLogFile();
         // Throttle rotation checks to reduce overhead in tight loops (fixed interval).
         $rotateInterval = 30;
         $now = time();

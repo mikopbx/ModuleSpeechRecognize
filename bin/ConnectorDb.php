@@ -256,12 +256,15 @@ class ConnectorDb extends WorkerBase
     {
         $result = false;
         if(file_exists(self::PID_FILE)){
-            $psPath      = Util::which('ps');
-            $busyboxPath = Util::which('busybox');
-            $pid     = file_get_contents(self::PID_FILE);
-            $output  = shell_exec("$psPath -A -o pid | $busyboxPath grep $pid ");
-            if(!empty($output)){
-                $result = true;
+            $pid = trim((string)file_get_contents(self::PID_FILE));
+            if (ctype_digit($pid)) {
+                $pidInt = (int)$pid;
+                // Exact process check to avoid false positives from grep-based matching.
+                if ($pidInt > 1 && function_exists('posix_kill')) {
+                    $result = @posix_kill($pidInt, 0);
+                } elseif ($pidInt > 1) {
+                    $result = file_exists('/proc/' . $pidInt);
+                }
             }
         }
         if(!$result){
@@ -570,9 +573,24 @@ class ConnectorDb extends WorkerBase
 
 if(isset($argv) && count($argv) !== 1
     && Util::getFilePathByClassName(ConnectorDb::class) === $argv[0]){
+    $cliDebug = php_sapi_name() === 'cli' && in_array('start', $argv, true);
+    $debugOut = static function (string $message) use ($cliDebug): void {
+        if (!$cliDebug) {
+            return;
+        }
+        echo '[' . date('c') . '] ' . $message . PHP_EOL;
+    };
+    $debugOut('Boot ConnectorDb worker');
 
     if(ConnectorDb::processExists()){
+        $debugOut('Worker already running. Exit.');
         exit(0);
     }
-    ConnectorDb::startWorker($argv??[]);
+    $debugOut('PID lock acquired. Start worker loop.');
+    try {
+        ConnectorDb::startWorker($argv??[]);
+    } catch (\Throwable $e) {
+        $debugOut('Worker fatal: ' . $e->getMessage());
+        throw $e;
+    }
 }
