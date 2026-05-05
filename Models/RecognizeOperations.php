@@ -100,6 +100,30 @@ class RecognizeOperations extends ModulesModelsBase
      */
     public $time;
 
+    /**
+     *
+     * @Column(type="string", nullable=true)
+     */
+    public $provider;
+
+    /**
+     *
+     * @Column(type="integer", nullable=true, default="0")
+     */
+    public $attempts = 0;
+
+    /**
+     *
+     * @Column(type="integer", nullable=true)
+     */
+    public $submittedAt;
+
+    /**
+     *
+     * @Column(type="integer", nullable=true)
+     */
+    public $nextRetryAt;
+
     public function initialize(): void
     {
         $this->setSource('m_ModuleRecognizeOperations');

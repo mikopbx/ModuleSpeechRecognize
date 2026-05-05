@@ -12,8 +12,11 @@ return [
 	'mo_ModuleModuleSpeechRecognize'   => 'Модуль Распознавание речи',
     'BreadcrumbModuleSpeechRecognize'  => 'Распознавание речи',
     'SubHeaderModuleSpeechRecognize'   => 'Получения теста из звуковых файлов',
+    'module_speech_recognize_provider' => 'Поставщик распознавания речи',
     'module_speech_recognize_apiKey'   => 'Api key',
     'module_speech_recognize_secretKey'=> 'Secret key',
+    'module_speech_recognize_syncMaxSeconds' => 'Макс. длительность для sync-режима (сек, ≤28)',
+    'module_speech_recognize_mikoUseDeferredGeneral' => 'MIKO: использовать модель deferred-general (дешевле, SLA до 12 ч).',
     'module_speech_recognize_useLongRecognize'=> 'Использовать отложенное распознавание. Дешевле, но без распознавания эмоций.',
     'module_speech_recognize_recognizeAll'=> 'Распознавать все разговоры.',
 ];

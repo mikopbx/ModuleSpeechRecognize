@@ -48,6 +48,24 @@ class ModuleSpeechRecognize extends ModulesModelsBase
      */
     public $useLongRecognize = '0';
 
+    /**
+     *
+     * @Column(type="string", nullable=true, default="tinkoff")
+     */
+    public $provider = 'tinkoff';
+
+    /**
+     *
+     * @Column(type="integer", nullable=true, default="28")
+     */
+    public $syncMaxSeconds = '28';
+
+    /**
+     *
+     * @Column(type="integer", nullable=true, default="0")
+     */
+    public $mikoUseDeferredGeneral = '0';
+
     public function initialize(): void
     {
         $this->setSource('m_ModuleSpeechRecognize');

@@ -13,7 +13,11 @@ return [
     'BreadcrumbModuleSpeechRecognize'=> 'Template module',
     'SubHeaderModuleSpeechRecognize' => 'Example to create own modules',
     'module_template_AddNewRecord'  => 'Add new',
+    'module_speech_recognize_provider' => 'Speech recognition provider',
     'module_speech_recognize_apiKey'   => 'Api key',
     'module_speech_recognize_secretKey'=> 'Secret key',
+    'module_speech_recognize_syncMaxSeconds' => 'Sync mode max duration (sec, ≤28)',
+    'module_speech_recognize_mikoUseDeferredGeneral' => 'MIKO: use deferred-general model (cheaper, up to 12h SLA).',
     'module_speech_recognize_useLongRecognize'=> 'Use deferred recognition. Cheaper, but without emotion recognition.',
+    'module_speech_recognize_recognizeAll'    => 'Recognize all conversations.',
 ];

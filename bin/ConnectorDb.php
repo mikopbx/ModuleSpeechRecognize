@@ -423,14 +423,25 @@ class ConnectorDb extends WorkerBase
         if(!$operation){
             $operation = new RecognizeOperations();
         }
-        $operation->filename  = $dataCdr['recordingfile'];
-        $operation->operation = trim($result);
-        $operation->linkedId  = $dataCdr['linkedid'];
-        $operation->time = time();
+        // Сначала проброс совпадающих ключей из CDR-payload, затем форсируем
+        // обязательные поля и сброс retry-счётчиков. Иначе $dataCdr мог бы
+        // затереть только что установленные attempts/nextRetryAt/fail.
         foreach ($operation->toArray() as $key => $value) {
             if(isset($dataCdr[$key])){
                 $operation->$key = $dataCdr[$key];
             }
+        }
+        $operation->filename  = $dataCdr['recordingfile'];
+        $operation->operation = trim($result);
+        $operation->linkedId  = $dataCdr['linkedid'];
+        $operation->time = time();
+        // Сбрасываем счётчики при перезаписи задачи (новый submit).
+        $operation->attempts = 0;
+        $operation->nextRetryAt = null;
+        $operation->fail = 0;
+        // Фолбэк: если submittedAt не пришёл явно, ставим текущее время.
+        if (empty($operation->submittedAt)) {
+            $operation->submittedAt = time();
         }
         return [$operation->save()];
     }
@@ -525,12 +536,15 @@ class ConnectorDb extends WorkerBase
 
     public function getRecognizeOperations()
     {
-        $timestamp = time()-4;
+        // Polling-окно ≥ 10 сек (бриф §4.5).
+        $timestamp = time() - 10;
+        // Сортировка ASC, чтобы старые задачи не голодали при большом отставании.
         $filter = [
-            'time<:time:','bind' => [
+            'time<:time: AND (fail IS NULL OR fail=0)',
+            'bind' => [
                 'time'  => $timestamp
             ],
-            'order' => 'id DESC',
+            'order' => 'id ASC',
             'limit' => '50'
         ];
         /** @var RecognizeOperations $task */
@@ -561,12 +575,49 @@ class ConnectorDb extends WorkerBase
         ];
         /** @var RecognizeOperations $operations */
         $operations = RecognizeOperations::findFirst($filter);
+        $isNew = false;
         if(!$operations){
             $operations = new RecognizeOperations();
             $operations->UNIQUEID = $data['UNIQUEID'];
-            $operations->linkedId = $data['linkedid'];
+            $operations->linkedId = $data['linkedid'] ?? ($data['linkedId'] ?? '');
+            $isNew = true;
+        }
+        // Для новых записей заполняем «обязательные» поля, чтобы polling
+        // (фильтрует по time<now-10) и timeout-логика (submittedAt) видели их.
+        if ($isNew) {
+            $operations->filename    = $data['recordingfile'] ?? ($data['filename'] ?? '');
+            $operations->time        = time();
+            $operations->submittedAt = time();
+            // Прокидываем «знаемые» поля CDR, чтобы saveResponse в даемоне
+            // имел корректный UNIQUEID/linkedid при будущей обработке.
+            foreach (['start', 'src_num', 'dst_num', 'answer', 'endtime'] as $key) {
+                if (isset($data[$key])) {
+                    $operations->$key = $data[$key];
+                }
+            }
+        }
+        // Если в payload явно переданы attempts/nextRetryAt/fail/provider — применяем их.
+        // Иначе старое поведение: помечаем как failed.
+        $hasRetryFields = isset($data['attempts']) || isset($data['nextRetryAt']);
+        if ($hasRetryFields) {
+            if (isset($data['attempts'])) {
+                $operations->attempts = (int)$data['attempts'];
+            }
+            if (array_key_exists('nextRetryAt', $data)) {
+                $operations->nextRetryAt = $data['nextRetryAt'] !== null ? (int)$data['nextRetryAt'] : null;
+            }
+            if (isset($data['fail'])) {
+                $operations->fail = (int)$data['fail'];
+            }
+            if (!empty($data['provider'])) {
+                $operations->provider = (string)$data['provider'];
+            }
+            return [$operations->save()];
         }
         $operations->fail = 1;
+        if (!empty($data['provider'])) {
+            $operations->provider = (string)$data['provider'];
+        }
         return [$operations->save()];
     }
 }

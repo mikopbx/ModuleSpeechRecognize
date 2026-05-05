@@ -87,7 +87,8 @@ class SpeechRecognizeDaemon
             $this->logger->writeError('Settings not found...');
             return;
         }
-        if(empty($this->sr->getPidContainer())){
+        // Docker-контейнер требуется только Tinkoff-провайдеру.
+        if(!$this->sr->isMikoProvider() && empty($this->sr->getPidContainer())){
             $this->logger->writeError('Docker container not started...');
             return;
         }
@@ -233,26 +234,105 @@ class SpeechRecognizeDaemon
 
     /**
      * Получение результатов распознавания.
+     * Tinkoff long-режим — для записей без provider/с provider='tinkoff'.
+     * MIKO — всегда async, опрашивается отдельной веткой.
      */
     public function getRecognizeResponses():void
     {
-        if(!$this->sr->useLongRecognize()){
+        $isMiko = $this->sr->isMikoProvider();
+        if (!$isMiko && !$this->sr->useLongRecognize()) {
             return;
         }
         $operations = ConnectorDb::invoke(ConnectorDb::FUNC_GET_RECOGNIZE_OPERATIONS, []);
-        foreach ($operations as $srcTask){
+        $now = time();
+        foreach ($operations as $srcTask) {
             $task = (object)$srcTask;
-            $response = $this->sr->getLongRecognizeResponse($task->operation, $task->filename);
-            if(empty($response)){
-                $task->fail = 1;
-            }else{
-                if($this->saveResponse($response, (array)$task, $task->linkedId)){
-                    continue;
-                }
-                ConnectorDb::invoke(ConnectorDb::FUNC_DEL_RECOGNIZE_OPERATIONS, [$task->id]);
+            $taskProvider = strtolower((string)($task->provider ?? ''));
+            if ($taskProvider === '') {
+                // Старые записи без provider — это Tinkoff long.
+                $taskProvider = SpeechRecognizeConf::PROVIDER_TINKOFF;
             }
-            usleep(50000);
+            // Откладываем задачи, для которых задана пауза между попытками.
+            if (!empty($task->nextRetryAt) && (int)$task->nextRetryAt > $now) {
+                continue;
+            }
+
+            if ($taskProvider === SpeechRecognizeConf::PROVIDER_MIKO) {
+                $this->processMikoOperation($task, $now);
+            } else {
+                $response = $this->sr->getLongRecognizeResponse($task->operation, $task->filename);
+                if (empty($response)) {
+                    $task->fail = 1;
+                } else {
+                    if ($this->saveResponse($response, (array)$task, $task->linkedId)) {
+                        continue;
+                    }
+                    ConnectorDb::invoke(ConnectorDb::FUNC_DEL_RECOGNIZE_OPERATIONS, [$task->id]);
+                }
+                usleep(50000);
+            }
         }
+    }
+
+    private const MIKO_MAX_ATTEMPTS = 3;
+    private const MIKO_TASK_TIMEOUT_SEC = 7200;       // 2 часа для general
+    private const MIKO_DEFERRED_TIMEOUT_SEC = 86400;  // 24 часа для deferred-general
+
+    /**
+     * Опрос одной MIKO-задачи: обработать done/in-progress/ошибки, обновить attempts/timeouts.
+     */
+    private function processMikoOperation(\stdClass $task, int $now): void
+    {
+        $submittedAt = (int)($task->submittedAt ?? $task->time ?? 0);
+        $deadline = $this->sr->isMikoUseDeferredGeneral()
+            ? self::MIKO_DEFERRED_TIMEOUT_SEC
+            : self::MIKO_TASK_TIMEOUT_SEC;
+        if ($submittedAt > 0 && ($now - $submittedAt) > $deadline) {
+            $payload = (array)$task;
+            $payload['fail'] = 1;
+            ConnectorDb::invoke(ConnectorDb::FUNC_UPD_RECOGNIZE_OPERATIONS, [$payload], false);
+            return;
+        }
+        try {
+            $response = $this->sr->getMikoRecognizeResponse((string)$task->operation, (string)$task->filename);
+        } catch (Throwable $e) {
+            $code = (int)$e->getCode();
+            // 401/403 — битый/отозванный лицензионный ключ. Дальнейшие ретраи бесполезны.
+            if ($code === 401 || $code === 403) {
+                $payload = (array)$task;
+                $payload['fail'] = 1;
+                ConnectorDb::invoke(ConnectorDb::FUNC_UPD_RECOGNIZE_OPERATIONS, [$payload], false);
+                $this->logger->writeError('MIKO fetch fatal (' . $code . '): ' . $e->getMessage() . ', ' . ($task->linkedId ?? ''));
+                return;
+            }
+            // 5xx / network — экспоненциальный backoff до MIKO_MAX_ATTEMPTS.
+            $this->scheduleMikoRetry($task, $now, $e->getMessage());
+            return;
+        }
+        if (empty($response)) {
+            // done=false — просто ждём, без увеличения attempts.
+            return;
+        }
+        if ($this->saveResponse($response, (array)$task, $task->linkedId ?? '')) {
+            return;
+        }
+        ConnectorDb::invoke(ConnectorDb::FUNC_DEL_RECOGNIZE_OPERATIONS, [$task->id]);
+    }
+
+    private function scheduleMikoRetry(\stdClass $task, int $now, string $reason): void
+    {
+        $attempts = (int)($task->attempts ?? 0) + 1;
+        $payload = (array)$task;
+        $payload['attempts'] = $attempts;
+        if ($attempts >= self::MIKO_MAX_ATTEMPTS) {
+            $payload['fail'] = 1;
+            $this->logger->writeError('MIKO fetch attempts exceeded: ' . $reason . ', ' . ($task->linkedId ?? ''));
+        } else {
+            $delay = min(60 * (2 ** ($attempts - 1)), 600);
+            $payload['nextRetryAt'] = $now + $delay;
+            $this->logVerbose('MIKO fetch retry in ' . $delay . 's (attempt ' . $attempts . '): ' . $reason);
+        }
+        ConnectorDb::invoke(ConnectorDb::FUNC_UPD_RECOGNIZE_OPERATIONS, [$payload], false);
     }
 
     /**
@@ -306,7 +386,8 @@ class SpeechRecognizeDaemon
                 $this->logVerbose('File was transcribe...' .$data['linkedid'].':'. $data['recordingfile']);
                 continue;
             }
-            if($this->sr->useLongRecognize()){
+            $useAsync = $this->resolveAsyncMode($data);
+            if($useAsync){
                 $this->sr->sendToRecognize($data);
             }else{
                 $response = $this->sr->recognize($data['recordingfile']);
@@ -322,6 +403,30 @@ class SpeechRecognizeDaemon
         if($updateOffsetInDB){
             $this->updateOffsetInDB($newOffset);
         }
+    }
+
+    /**
+     * Для MIKO решение sync/async — по длительности файла (probe без перекодирования).
+     * Для Tinkoff — по флагу useLongRecognize (старое поведение).
+     */
+    private function resolveAsyncMode(array $data): bool
+    {
+        if (!$this->sr->isMikoProvider()) {
+            return $this->sr->useLongRecognize();
+        }
+        try {
+            $duration = $this->sr->probeDuration($data['recordingfile']);
+        } catch (Throwable $e) {
+            // Если probe вообще упал — пускаем в async, sendToRecognizeMiko
+            // повторно вызовет prepare() и при ошибке пометит запись как fail.
+            $this->logger->writeError('MIKO probe failed: ' . $e->getMessage() . ', ' . ($data['linkedid'] ?? ''));
+            return true;
+        }
+        if ($duration <= 0.0) {
+            // Не удалось определить длительность — безопаснее в async.
+            return true;
+        }
+        return $duration > $this->sr->getSyncMaxSeconds();
     }
 
     private function updateOffsetInDB($newOffset):void

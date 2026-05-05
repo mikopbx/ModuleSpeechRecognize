@@ -140,11 +140,22 @@ class ModuleSpeechRecognizeController extends BaseController
                     break;
                 case 'recognizeAll':
                 case 'useLongRecognize':
+                case 'mikoUseDeferredGeneral':
                     if (array_key_exists($key, $data)) {
                         $record->$key = ($data[$key] === 'on') ? '1' : '0';
                     } else {
                         $record->$key = '0';
                     }
+                    break;
+                case 'provider':
+                    $providerRaw = strtolower(trim((string)($data[$key] ?? 'tinkoff')));
+                    $record->$key = ($providerRaw === 'miko') ? 'miko' : 'tinkoff';
+                    break;
+                case 'syncMaxSeconds':
+                    $value = (int)($data[$key] ?? 28);
+                    if ($value < 1) { $value = 1; }
+                    if ($value > 28) { $value = 28; }
+                    $record->$key = (string)$value;
                     break;
                 default:
                     if (array_key_exists($key, $data)) {
